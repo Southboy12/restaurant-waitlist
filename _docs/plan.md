@@ -1,7 +1,7 @@
 # Restaurant Waitlist Manager – Project Scope
 
 ## Overview
-Staff-only waitlist management app for a **single restaurant**, used on mobile devices (phones/tablets).
+Staff-only waitlist management **web application** for a **single restaurant**.
 
 ## Core Workflow
 1. **Add Party** – Staff enters:
@@ -21,9 +21,10 @@ Staff-only waitlist management app for a **single restaurant**, used on mobile d
    - No-show (timed out)
    - Notified (with timestamp)
 
-## Device
-- Mobile-first (phones/tablets)
-- Responsive design
+## Device / Platform
+- Web application (browser-based)
+- Responsive design suitable for phones, tablets, and desktop displays
+- Accessible from any modern browser; no native app required
 
 ## Out of Scope
 - Guest-facing app or portal
