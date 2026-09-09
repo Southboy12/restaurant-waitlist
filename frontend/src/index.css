@@ -1,0 +1,545 @@
+/* ==========================================================================
+   Restaurant Waitlist — Global Styles
+   Responsive web app, mobile-first
+   ========================================================================== */
+
+/* --- Reset & Base --------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-bg: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-success: #16a34a;
+  --color-success-bg: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-bg: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-bg: #fee2e2;
+  --color-text: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-border: #e5e7eb;
+  --color-radius: 12px;
+  --color-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+    Cantarell, 'Helvetica Neue', sans-serif;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* --- App Layout ---------------------------------------------------------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 12px;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.app-header h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.app-nav {
+  display: flex;
+  gap: 4px;
+  background: var(--color-surface);
+  border-radius: var(--color-radius);
+  padding: 4px;
+  box-shadow: var(--color-shadow);
+}
+
+.nav-btn {
+  border: none;
+  background: transparent;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.nav-btn:hover {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.nav-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.app-main {
+  flex: 1;
+  padding-bottom: 80px;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 12px 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+  margin-top: auto;
+}
+
+/* --- Views --------------------------------------------------------------- */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.view-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.view-header h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.count-badge {
+  background: var(--color-surface);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  box-shadow: var(--color-shadow);
+}
+
+.view-loading {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+/* --- Add Party Form ------------------------------------------------------ */
+
+.add-party-form {
+  background: var(--color-surface);
+  border-radius: var(--color-radius);
+  padding: 16px;
+  box-shadow: var(--color-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.add-party-form h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-row-inline {
+  flex-direction: row;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.input-small {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, opacity 0.15s;
+  width: 100%;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn-success {
+  background: var(--color-success);
+  color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #15803d;
+}
+
+/* --- Party List ---------------------------------------------------------- */
+
+.party-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --- Party Card --------------------------------------------------------- */
+
+.party-card {
+  background: var(--color-surface);
+  border-radius: var(--color-radius);
+  padding: 14px 16px;
+  box-shadow: var(--color-shadow);
+  border-left: 4px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s;
+}
+
+.party-card.status-notified {
+  border-left-color: var(--color-warning);
+}
+
+.party-card.status-waiting {
+  border-left-color: var(--color-primary);
+}
+
+.party-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.party-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.party-name-text {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.party-size {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.party-phone {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  font-family: monospace;
+}
+
+.party-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.status-waiting {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.status-notified {
+  color: var(--color-warning);
+  font-weight: 500;
+}
+
+.party-added {
+  color: var(--color-text-secondary);
+}
+
+/* --- Timer -------------------------------------------------------------- */
+
+.timer-section {
+  padding: 8px 0;
+}
+
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-label {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.timer-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--color-text);
+}
+
+.timer-active .timer-value {
+  color: var(--color-warning);
+}
+
+.timer-expired .timer-value {
+  color: var(--color-danger);
+  font-size: 1rem;
+}
+
+.expired-badge {
+  font-size: 0.8125rem;
+  color: var(--color-danger);
+  font-weight: 500;
+  background: var(--color-danger-bg);
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+/* --- Party Actions ------------------------------------------------------- */
+
+.party-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+}
+
+/* --- Modal --------------------------------------------------------------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--color-surface);
+  border-radius: var(--color-radius);
+  padding: 20px;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal h4 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.modal p {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.sms-preview {
+  background: var(--color-bg);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--color-border);
+}
+
+.modal .btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* --- History Table ------------------------------------------------------ */
+
+.history-table-wrapper {
+  background: var(--color-surface);
+  border-radius: var(--color-radius);
+  box-shadow: var(--color-shadow);
+  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.history-table th {
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--color-bg);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.history-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.history-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.history-table tbody tr:hover {
+  background: var(--color-bg);
+}
+
+.td-name {
+  font-weight: 500;
+}
+
+.td-phone {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.td-time {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-seated {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.badge-no-show {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* --- Responsive: Mobile ------------------------------------------------- */
+
+@media (min-width: 640px) {
+  .app {
+    padding: 0 24px;
+  }
+
+  .app-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .form-row-inline {
+    flex-direction: row;
+  }
+
+  .party-card {
+    padding: 18px 20px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app {
+    max-width: 900px;
+  }
+}
+
