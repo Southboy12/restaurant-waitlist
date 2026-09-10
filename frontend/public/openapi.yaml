@@ -1,0 +1,338 @@
+openapi: 3.1.0
+
+info:
+  title: Restaurant Waitlist API
+  description: |
+    Backend API for the Olive & Ember waitlist manager frontend.
+
+    ## Authentication
+
+    All endpoints require authentication via a Bearer token in the
+    `Authorization` header:
+
+    ```
+    Authorization: Bearer <token>
+    ```
+
+    Tokens are short-lived staff session tokens issued by the auth
+    service. Unauthenticated requests receive `401 Unauthorized`.
+
+    ## Data model
+
+    All timestamp fields (`addedAt`, `notifiedAt`, `expiresAt`,
+    `resolvedAt`) are Unix milliseconds (number) as expected by the
+    frontend.
+
+  version: 1.0.0
+  contact:
+    name: Restaurant Waitlist API
+
+servers:
+  - url: /api
+    description: Same-origin relative path (Vite dev proxy / production)
+
+tags:
+  - name: Parties
+    description: Waitlist party management
+
+paths:
+  /parties:
+    post:
+      tags: [Parties]
+      summary: Add a party to the waitlist
+      operationId: addParty
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartyFormData'
+            examples:
+              example1:
+                value:
+                  name: "Adeyemi"
+                  size: "4"
+                  phone: "+234 803 114 2288"
+      responses:
+        "201":
+          description: Party created and added to the active waitlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Party'
+        "400":
+          description: Validation error (missing name, invalid size, missing phone)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /parties/active:
+    get:
+      tags: [Parties]
+      summary: List currently active (waiting) parties
+      operationId: getActiveParties
+      security:
+        - bearerAuth: []
+      description: |
+        Returns parties that are currently waiting. The backend is
+        responsible for moving expired parties (where `expiresAt`
+        has passed) to history as no-shows before returning the list.
+      responses:
+        "200":
+          description: List of active parties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Party'
+        "401":
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /parties/history:
+    get:
+      tags: [Parties]
+      summary: List seating history
+      operationId: getHistory
+      security:
+        - bearerAuth: []
+      description: |
+        Returns the full seating history (both seated and no-show
+        parties) in reverse chronological order (most recent first).
+      responses:
+        "200":
+          description: List of historical parties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Party'
+        "401":
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /parties/{id}/notify:
+    post:
+      tags: [Parties]
+      summary: Notify a waiting party by SMS that their table is ready
+      operationId: notifyParty
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The party ID
+      responses:
+        "200":
+          description: Notification sent; returns the updated party and the SMS message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotifyResponse'
+        "404":
+          description: Party not found in the active waitlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /parties/{id}/seat:
+    post:
+      tags: [Parties]
+      summary: Seat a notified party — move them from active to history as seated
+      operationId: seatParty
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The party ID
+      responses:
+        "200":
+          description: Party seated; returns the updated party record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Party'
+        "404":
+          description: Party not found in the active waitlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /parties/{id}:
+    delete:
+      tags: [Parties]
+      summary: Remove a party from the waitlist (mark as no-show)
+      operationId: removeParty
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The party ID
+      responses:
+        "204":
+          description: Party removed and moved to history as no-show
+        "404":
+          description: Party not found in the active waitlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Staff session token issued by the auth service. Include in the
+        `Authorization` header as `Bearer <token>`.
+
+  schemas:
+    Party:
+      type: object
+      required:
+        - id
+        - name
+        - size
+        - phone
+        - addedAt
+      properties:
+        id:
+          type: string
+          description: Unique party identifier (UUID or similar)
+          example: "p1"
+        name:
+          type: string
+          description: Party name (typically the lead guest name)
+          example: "Adeyemi"
+        size:
+          type: integer
+          description: Number of guests in the party
+          minimum: 1
+          example: 4
+        phone:
+          type: string
+          description: Phone number for SMS notification
+          example: "+234 803 114 2288"
+        addedAt:
+          type: number
+          description: Unix milliseconds when the party was added to the waitlist
+          example: 1735000000000
+        notifiedAt:
+          type: number
+          nullable: true
+          description: Unix milliseconds when the SMS notification was sent, or null if not yet notified
+          example: 1735000300000
+        expiresAt:
+          type: number
+          nullable: true
+          description: |
+            Unix milliseconds when the party's notification expires
+            (notifiedAt + timeout). Null if not yet notified.
+          example: 1735001200000
+        resolvedAt:
+          type: number
+          nullable: true
+          description: Unix milliseconds when the party was resolved (seated or no-show), or null if still active
+          example: 1735001200000
+        resolution:
+          type: string
+          nullable: true
+          enum: [seated, no-show]
+          description: How the party was resolved. Null while still active.
+          example: "seated"
+
+    PartyFormData:
+      type: object
+      required:
+        - name
+        - size
+        - phone
+      properties:
+        name:
+          type: string
+          description: Party name (lead guest name)
+          minLength: 1
+          example: "Adeyemi"
+        size:
+          type: string
+          description: Number of guests as a string (frontend sends as string)
+          pattern: '^[1-9]\d*$'
+          example: "4"
+        phone:
+          type: string
+          description: Phone number for SMS notification
+          minLength: 1
+          example: "+234 803 114 2288"
+
+    NotifyResponse:
+      type: object
+      required:
+        - party
+        - message
+      properties:
+        party:
+          $ref: '#/components/schemas/Party'
+        message:
+          type: string
+          description: The SMS message that was sent
+          example: "Your table is ready at Olive & Ember! Please come to the host stand as soon as possible."
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Failed to add party"

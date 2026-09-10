@@ -1,157 +1,160 @@
 import type { Party, PartyFormData } from "../types";
 
 // ---------------------------------------------------------------------------
-// API client — centralized backend calls
+// API client — real backend calls with Bearer token auth
 // ---------------------------------------------------------------------------
 
-const USE_MOCK = true;
+const API_BASE = "/api";
 
-// --- Helpers ---
+// --- Token management (simple in-memory, no persistence) ---
 
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+let authToken: string | null = null;
+let tokenExpiry: number | null = null;
+
+/**
+ * Set the auth token. Called after login. In a real app this would come
+ * from an auth flow; for now the app assumes the backend is running and
+ * we auto-login with default credentials on first API call.
+ */
+export function setAuthToken(token: string, expiryMs: number): void {
+  authToken = token;
+  tokenExpiry = Date.now() + expiryMs;
 }
 
-function nowMs(): number {
-  return Date.now();
+export function clearAuthToken(): void {
+  authToken = null;
+  tokenExpiry = null;
 }
 
-// --- Mock store (in-memory) ---
+/**
+ * Check if the token is still valid.
+ */
+export function isTokenValid(): boolean {
+  if (!authToken || !tokenExpiry) return false;
+  return Date.now() < tokenExpiry;
+}
 
-const mockStore: {
-  active: Party[];
-  history: Party[];
-} = { active: [], history: [] };
+// --- Auto-login helper ---
+
+async function ensureAuthenticated(): Promise<void> {
+  if (isTokenValid()) return;
+
+  // Try to login with default credentials
+  const resp = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "host", password: "host123" }),
+  });
+
+  if (!resp.ok) {
+    throw new Error("Authentication failed — check that the backend is running");
+  }
+
+  const data = await resp.json();
+  // JWT exp claim is in seconds; we store ms and add a small buffer
+  const expiresIn = (data.expires_in ?? 60) * 1000;
+  setAuthToken(data.access_token, expiresIn);
+}
+
+// --- Helper for authenticated fetch ---
+
+async function authFetch(
+  path: string,
+  options: RequestInit = {},
+): Promise<Response> {
+  await ensureAuthenticated();
+
+  return fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+      ...options.headers,
+    },
+  });
+}
 
 // --- API functions ---
 
 export async function addParty(data: PartyFormData): Promise<Party> {
-  if (USE_MOCK) {
-    const party: Party = {
-      id: generateId(),
+  const res = await authFetch(`${API_BASE}/parties`, {
+    method: "POST",
+    body: JSON.stringify({
       name: data.name.trim(),
-      size: Math.max(1, parseInt(data.size, 10) || 1),
+      size: data.size,
       phone: data.phone.trim(),
-      addedAt: nowMs(),
-      notifiedAt: null,
-      expiresAt: null,
-      resolvedAt: null,
-      resolution: null,
-    };
-    mockStore.active.unshift(party);
-    return party;
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to add party" }));
+    throw new Error((err as { error?: string }).error ?? "Failed to add party");
   }
 
-  const res = await fetch("/api/parties", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error("Failed to add party");
   return res.json();
 }
 
 export async function getActiveParties(): Promise<Party[]> {
-  if (USE_MOCK) {
-    const now = nowMs();
-    const stillActive: Party[] = [];
-    const expired: Party[] = [];
+  const res = await authFetch(`${API_BASE}/parties/active`);
 
-    for (const p of mockStore.active) {
-      if (p.expiresAt !== null && p.expiresAt <= now) {
-        expired.push(p);
-      } else {
-        stillActive.push(p);
-      }
-    }
-
-    for (const p of expired) {
-      p.resolution = "no-show";
-      p.resolvedAt = now;
-      mockStore.history.unshift(p);
-    }
-    mockStore.active = stillActive;
-
-    return stillActive;
+  if (!res.ok) {
+    throw new Error("Failed to fetch active parties");
   }
 
-  const res = await fetch("/api/parties/active");
-  if (!res.ok) throw new Error("Failed to fetch active parties");
   return res.json();
 }
 
 export async function getHistory(): Promise<Party[]> {
-  if (USE_MOCK) {
-    return [...mockStore.history];
+  const res = await authFetch(`${API_BASE}/parties/history`);
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch history");
   }
 
-  const res = await fetch("/api/parties/history");
-  if (!res.ok) throw new Error("Failed to fetch history");
   return res.json();
 }
 
-export async function notifyParty(id: string): Promise<{ party: Party; message: string }> {
-  if (USE_MOCK) {
-    const idx = mockStore.active.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error("Party not found in active list");
-
-    const party = mockStore.active[idx];
-    const notifiedAt = nowMs();
-    const expiresAt = notifiedAt + 15 * 60 * 1000;
-
-    party.notifiedAt = notifiedAt;
-    party.expiresAt = expiresAt;
-
-    const message = `Your table is ready at Restaurant Waitlist! Please come to the host stand as soon as possible.`;
-
-    console.log(`[MOCK SMS] To: ${party.phone} — "${message}"`);
-
-    return { party, message };
-  }
-
-  const res = await fetch(`/api/parties/${id}/notify`, {
+export async function notifyParty(
+  id: string,
+): Promise<{ party: Party; message: string }> {
+  const res = await authFetch(`${API_BASE}/parties/${id}/notify`, {
     method: "POST",
   });
-  if (!res.ok) throw new Error("Failed to send notification");
+
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error("Party not found in active list");
+    }
+    throw new Error("Failed to send notification");
+  }
+
   return res.json();
 }
 
 export async function seatParty(id: string): Promise<Party> {
-  if (USE_MOCK) {
-    const idx = mockStore.active.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error("Party not found in active list");
-
-    const party = mockStore.active[idx];
-    party.resolution = "seated";
-    party.resolvedAt = nowMs();
-    party.expiresAt = null;
-
-    mockStore.history.unshift(party);
-    mockStore.active.splice(idx, 1);
-
-    return party;
-  }
-
-  const res = await fetch(`/api/parties/${id}/seat`, {
+  const res = await authFetch(`${API_BASE}/parties/${id}/seat`, {
     method: "POST",
   });
-  if (!res.ok) throw new Error("Failed to seat party");
+
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error("Party not found in active list");
+    }
+    throw new Error("Failed to seat party");
+  }
+
   return res.json();
 }
 
 export async function removeParty(id: string): Promise<void> {
-  if (USE_MOCK) {
-    const idx = mockStore.active.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error("Party not found in active list");
+  const res = await authFetch(`${API_BASE}/parties/${id}`, {
+    method: "DELETE",
+  });
 
-    const party = mockStore.active[idx];
-    party.resolution = "no-show";
-    party.resolvedAt = nowMs();
-
-    mockStore.history.unshift(party);
-    mockStore.active.splice(idx, 1);
-  } else {
-    const res = await fetch(`/api/parties/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("Failed to remove party");
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error("Party not found in active list");
+    }
+    throw new Error("Failed to remove party");
   }
 }
