@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: waitlist-db
+    environment:
+      POSTGRES_USER: waitlist
+      POSTGRES_PASSWORD: waitlist123
+      POSTGRES_DB: waitlist_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - waitlist-pgdata:/var/lib/postgresql/data
+    networks:
+      - waitlist-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waitlist -d waitlist_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: restaurant-waitlist-app
+    environment:
+      DATABASE_URL: postgresql://waitlist:waitlist123@db:5432/waitlist_db
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - waitlist-net
+
+volumes:
+  waitlist-pgdata:
+
+networks:
+  waitlist-net:
+    driver: bridge

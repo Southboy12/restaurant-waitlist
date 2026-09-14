@@ -65,8 +65,9 @@ async def serve_frontend(full_path: str):
     file_path = os.path.join(static_dir, full_path)
 
     # If the file exists and is within the static directory, serve it
-    if os.path.isfile(file_path) and file_path.startswith(os.path.abspath(static_dir)):
-        return FileResponse(file_path)
+    abs_file_path = os.path.abspath(file_path)
+    if os.path.isfile(abs_file_path) and abs_file_path.startswith(os.path.abspath(static_dir)):
+        return FileResponse(abs_file_path)
 
     # Otherwise, serve index.html for client-side routing
     if os.path.exists(index_path):
