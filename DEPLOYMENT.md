@@ -69,6 +69,19 @@ fly deploy
 
 That's it. Fly rebuilds the Docker image and rolls it out.
 
+### Optional: auto-deploy on push to `master`
+
+A GitHub Actions workflow exists at `.github/workflows/fly-deploy.yml`.
+To enable it, add your Fly API token as a repo secret:
+
+```bash
+fly auth token
+```
+
+Then in GitHub: **Settings → Secrets → Actions → New secret**
+`FLY_API_TOKEN = <token from above>`. Every push to `master`/`main`
+will then run `flyctl deploy --remote-only` automatically.
+
 ---
 
 ## Useful Commands
