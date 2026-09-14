@@ -69,18 +69,36 @@ fly deploy
 
 That's it. Fly rebuilds the Docker image and rolls it out.
 
-### Optional: auto-deploy on push to `master`
+### Optional: CI/CD pipeline (`.github/workflows/fly-deploy.yml`)
 
-A GitHub Actions workflow exists at `.github/workflows/fly-deploy.yml`.
-To enable it, add your Fly API token as a repo secret:
+Every push/PR runs this pipeline automatically:
+
+| Job | What it does |
+|-----|--------------|
+| `backend-tests` + `frontend-tests` | **Run in parallel.** Backend runs `pytest` (unit suites only); frontend runs `npm ci`, `npm run build` (typecheck+build), then `npm test` (Vitest). |
+| `compose-tests` | Builds the full `docker-compose.yaml` stack (`docker compose up -d --build`), waits for `/api/health`, then runs `test_integration.py` (API-level) and `test_e2e.py` (frontend serving + full user journeys) against it. Tears the stack down afterwards. |
+| `deploy` | On pushes to `main`/`master` only (not PRs): `flyctl deploy --remote-only`. Needs the `FLY_API_TOKEN` secret (see below). |
+| `verify-deploy` | Polls `https://restaurant-waitlist.fly.dev/api/health` until it returns `{"status":"ok"}` (up to ~5 min), then checks `/` serves the frontend shell (`<div id="root">`). Fails the run if the deploy isn't healthy. |
+
+To enable deploys, add your Fly API token as a repo secret
+(`fly auth token`, then GitHub **Settings → Secrets → Actions → New secret**
+`FLY_API_TOKEN = <token>`). Unit + compose tests run on every PR without any
+secrets.
+
+To run the same checks locally:
 
 ```bash
-fly auth token
-```
+# Backend unit tests (SQLite, no compose needed)
+cd backend && uv run pytest tests/ -q --ignore=tests/test_integration.py --ignore=tests/test_e2e.py
 
-Then in GitHub: **Settings → Secrets → Actions → New secret**
-`FLY_API_TOKEN = <token from above>`. Every push to `master`/`main`
-will then run `flyctl deploy --remote-only` automatically.
+# Frontend tests
+cd frontend && npm ci && npm test
+
+# Compose integration + e2e tests
+docker-compose up -d --build
+API_BASE_URL=http://localhost:8000 pytest backend/tests/test_integration.py backend/tests/test_e2e.py -v
+docker-compose down -v
+```
 
 ---
 

@@ -1,19 +1,181 @@
 # See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
 
-name: Fly Deploy
+name: CI/CD
+
 on:
   push:
     branches:
       - main
       - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+env:
+  API_BASE_URL: http://localhost:8000
+  FLY_APP_NAME: restaurant-waitlist
+
 jobs:
-  deploy:
-    name: Deploy app
+  # ---------------------------------------------------------------------------
+  # 1. Unit tests — run in parallel (backend + frontend are independent)
+  # ---------------------------------------------------------------------------
+  backend-tests:
+    name: Backend unit tests
     runs-on: ubuntu-latest
-    concurrency: deploy-group    # optional: ensure only one action runs at a time
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run backend unit tests (excludes compose-dependent suites)
+        run: >-
+          uv run pytest tests/ -q
+          --ignore=tests/test_integration.py
+          --ignore=tests/test_e2e.py
+
+  frontend-tests:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck + build
+        run: npm run build
+
+      - name: Run frontend tests
+        run: npm test
+
+  # ---------------------------------------------------------------------------
+  # 2. Compose stack: build + integration + end-to-end tests (needs both suites
+  #    above to pass first so we don't burn time building a broken stack)
+  # ---------------------------------------------------------------------------
+  compose-tests:
+    name: Compose integration + e2e tests
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test runner deps
+        run: pip install pytest requests
+
+      - name: Build and start the compose stack
+        run: docker compose up -d --build
+
+      - name: Wait for the stack to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/api/health > /dev/null; then
+              echo "Stack is healthy"
+              exit 0
+            fi
+            echo "Waiting for stack... ($i/30)"
+            sleep 5
+          done
+          echo "Stack never became healthy"
+          docker compose logs --tail=100
+          exit 1
+
+      - name: Run integration tests against compose
+        run: python -m pytest backend/tests/test_integration.py -v
+        env:
+          API_BASE_URL: http://localhost:8000
+
+      - name: Run end-to-end tests against compose
+        run: python -m pytest backend/tests/test_e2e.py -v
+        env:
+          API_BASE_URL: http://localhost:8000
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down the compose stack
+        if: always()
+        run: docker compose down -v
+
+  # ---------------------------------------------------------------------------
+  # 3. Deploy to Fly.io (only on pushes to main/master, after all tests pass)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    needs: [compose-tests]
+    # Deploy on branch pushes only — not on pull requests.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    concurrency: deploy-group # ensure only one deploy runs at a time
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only
+
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # 4. Post-deploy validation: poll the live health endpoint
+  # ---------------------------------------------------------------------------
+  verify-deploy:
+    name: Verify Fly.io deployment
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    steps:
+      - name: Wait for Fly.io release to go live
+        run: sleep 45
+
+      - name: Check live health endpoint
+        run: |
+          APP_URL="https://${{ env.FLY_APP_NAME }}.fly.dev"
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /tmp/health.json -w "%{http_code}" "$APP_URL/api/health" || echo "000")
+            echo "Attempt $i/20: HTTP $CODE"
+            if [ "$CODE" = "200" ] && grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/health.json; then
+              echo "Deploy verified: $APP_URL is healthy"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Live health check failed after 20 attempts"
+          exit 1
+
+      - name: Check frontend is served
+        run: |
+          APP_URL="https://${{ env.FLY_APP_NAME }}.fly.dev"
+          CODE=$(curl -s -o /tmp/index.html -w "%{http_code}" "$APP_URL/" || echo "000")
+          echo "Frontend HTTP $CODE"
+          grep -q '<div id="root">' /tmp/index.html && echo "Frontend OK" || (echo "Frontend check failed"; exit 1)
+
