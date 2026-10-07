@@ -1,0 +1,89 @@
+# Cloudflare Containers configuration for restaurant-waitlist
+# https://developers.cloudflare.com/containers/configuration/
+#
+# Architecture:
+# - Cloudflare Containers (backend FastAPI, Docker image)
+# - Cloudflare Pages (frontend static files)
+# - Cloudflare D1 (database)
+#
+# The `main` field points to a minimal Worker entry point (JS/TS) that
+# handles routing and forwards /api/* to the backend container.
+# The backend itself runs inside a Docker container (no Python Workers).
+#
+# Required GitHub Secrets:
+#   - CLOUDFLARE_ACCOUNT_ID
+#   - CLOUDFLARE_API_TOKEN
+
+name = "restaurant-waitlist"
+main = "worker/index.ts"
+compatibility_date = "2026-10-07"
+
+# ============================================================================
+# Cloudflare Pages (frontend)
+# ============================================================================
+# The built React frontend is served from the `dist/` directory.
+
+[observability]
+enabled = true
+
+[assets]
+directory = "./frontend/dist"
+binding = "ASSETS"
+# Serve the frontend for non-API paths
+run_worker_first = ["/", "/index.html"]
+
+# ============================================================================
+# Cloudflare Containers (backend FastAPI)
+# ============================================================================
+# The backend is a Docker container (built from the root Dockerfile).
+# The container serves the FastAPI backend and the static frontend files.
+#
+# Deployment:
+#   1. Build the Docker image and push to Cloudflare registry:
+#      npx wrangler containers build -t restaurant-waitlist:latest .
+#   2. Deploy (wrangler deploy will use the pushed image):
+#      npx wrangler deploy
+#
+# The Dockerfile at the repo root builds the frontend and copies it into
+# the container, so the backend serves both /api/* and the React app.
+
+[[containers]]
+class_name = "Backend"
+scheduling_policy = "durable_object"
+
+[containers.images.base]
+dockerfile = "./Dockerfile"
+
+# ============================================================================
+# Durable Objects bindings (backend container)
+# ============================================================================
+[[durable_objects.bindings]]
+name = "BACKEND"
+class_name = "Backend"
+
+# ============================================================================
+# Durable Object exports (backend container)
+# ============================================================================
+[exports.Backend]
+type = "durable-object"
+storage = "sqlite"
+
+# ============================================================================
+# D1 database (production database)
+# ============================================================================
+# Set the following as secrets via: wrangler secret put <KEY>
+#   DATABASE_URL: D1 connection string (postgresql://...)
+#   JWT_SECRET:   production JWT signing secret
+
+[[d1_databases]]
+binding = "restaurant_waitlist_db"
+database_name = "restaurant-waitlist-db"
+database_id = "6359d8ef-b1e0-4cdd-968c-b5ce717c265f"
+
+# ============================================================================
+# Environment variables
+# ============================================================================
+[vars]
+# Local development overrides (SQLite fallback)
+DATABASE_URL = "sqlite:///./waitlist.db"
+JWT_SECRET = "dev-local-secret-change-me"

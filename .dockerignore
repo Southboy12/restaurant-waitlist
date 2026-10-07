@@ -4,6 +4,7 @@
 # Node
 node_modules/
 frontend/node_modules/
+worker/node_modules/
 
 # Python
 .venv/
@@ -15,12 +16,6 @@ __pycache__/
 .Python
 pip-log.txt
 pip-delete-this-directory.txt
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
 
 # Build output (will be rebuilt in container)
 frontend/dist/
@@ -41,8 +36,11 @@ waitlist.db
 *.log
 tmp/
 temp/
-coverage/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Cloudflare worker config
+worker/dist/
+worker/.wrangler/

@@ -183,3 +183,66 @@ See `docker-compose.yaml` for the local Postgres + app setup.
 | Blank page at `/` but `/api/health` is ok | Frontend static files missing from image — ensure `fly deploy` builds from repo root so the frontend stage runs. Check `fly logs` for uvicorn startup errors. |
 | Out of memory (OOM) | Bump VM memory in `fly.toml` (`memory_mb = 512` is already set) or `fly scale memory 512`. |
 
+
+---
+
+## Deployment — Cloudflare (Free Tier)
+
+This project can also deploy to **Cloudflare** using three free-tier products:
+
+1. **Cloudflare Pages** — static React frontend
+2. **Cloudflare Containers** — FastAPI backend (Docker image)
+3. **Cloudflare D1** — SQLite-compatible database (free tier)
+
+See `_docs/cloudflare-deployment.md` for the full step-by-step guide.
+
+### Quick reference
+
+```bash
+# 1. Install wrangler and log in
+npm i -g wrangler
+wrangler login
+
+# 2. Create a D1 database
+wrangler d1 create restaurant-waitlist-db
+#   → save the database_id and connection_string
+
+# 3. Set secrets (required for production)
+wrangler secret put JWT_SECRET
+wrangler secret put DATABASE_URL
+
+# 4. Deploy the backend (Containers)
+wrangler deploy --env production
+
+# 5. Deploy the frontend (Pages)
+cd frontend && npm ci && npm run build
+wrangler pages deploy dist --project-name=restaurant-waitlist
+```
+
+### Environment variables (on Cloudflare)
+
+| Variable | How it's set | Description |
+|---|---|---|
+| `DATABASE_URL` | `wrangler secret put DATABASE_URL` | D1 connection string. `config.py` normalizes `postgres://` → `postgresql://`. |
+| `JWT_SECRET` | `wrangler secret put JWT_SECRET` | JWT signing secret. **Must be set** — never use the dev default. |
+| `PORT` | Containers runtime | Port uvicorn listens on (8000). |
+
+### GitHub Actions CI/CD
+
+Set these secrets in your repository (Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
+| `CLOUDFLARE_API_TOKEN` | API token with Containers, D1, and Pages permissions |
+| `JWT_SECRET` | Production JWT signing secret |
+
+The workflow `.github/workflows/cloudflare-deploy.yml` runs on every push to `main`/`master`.
+
+### Free tier limits
+
+| Product | Free tier |
+|---|---|
+| Cloudflare Pages | Static sites, unlimited bandwidth, free custom domains |
+| Cloudflare Containers | Shared CPU container, generous free allocation |
+| Cloudflare D1 | ~100k reads, ~100k writes, ~100k transformations per day |

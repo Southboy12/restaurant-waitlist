@@ -1,0 +1,245 @@
+# Cloudflare CI/CD for restaurant-waitlist
+# Deploys the backend to Cloudflare Containers and the frontend to Cloudflare Pages,
+# with a D1 database for production data.
+#
+# Required GitHub repository secrets:
+#   - CLOUDFLARE_ACCOUNT_ID:   Cloudflare account ID
+#   - CLOUDFLARE_API_TOKEN:    Cloudflare API token with Containers, D1, Pages permissions
+#   - JWT_SECRET:              Production JWT signing secret
+
+name: Cloudflare CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+env:
+  API_BASE_URL: http://localhost:8000
+  FLY_APP_NAME: restaurant-waitlist
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_PROJECT_NAME: restaurant-waitlist
+  D1_DATABASE_NAME: waitlist-db
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Unit tests — run in parallel (backend + frontend independent)
+  # ---------------------------------------------------------------------------
+  backend-tests:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run backend unit tests
+        run: uv run pytest tests/ -q --ignore=tests/test_integration.py --ignore=tests/test_e2e.py
+
+  frontend-tests:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck + build
+        run: npm run build
+
+      - name: Run frontend tests
+        run: npm test
+
+  # ---------------------------------------------------------------------------
+  # 2. Compose stack: build + integration + end-to-end tests
+  # ---------------------------------------------------------------------------
+  compose-tests:
+    name: Compose integration + e2e tests
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test runner deps
+        run: pip install pytest requests
+
+      - name: Build and start the compose stack
+        run: docker compose up -d --build
+
+      - name: Wait for the stack to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/api/health > /dev/null; then
+              echo "Stack is healthy"
+              exit 0
+            fi
+            echo "Waiting for stack... ($i/30)"
+            sleep 5
+          done
+          echo "Stack never became healthy"
+          docker compose logs --tail=100
+          exit 1
+
+      - name: Run integration tests against compose
+        run: python -m pytest backend/tests/test_integration.py -v
+        env:
+          API_BASE_URL: http://localhost:8000
+
+      - name: Run end-to-end tests against compose
+        run: python -m pytest backend/tests/test_e2e.py -v
+        env:
+          API_BASE_URL: http://localhost:8000
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down the compose stack
+        if: always()
+        run: docker compose down -v
+
+  # ---------------------------------------------------------------------------
+  # 3. Deploy to Cloudflare (only on pushes to main/master, after tests pass)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Cloudflare
+    runs-on: ubuntu-latest
+    needs: [compose-tests]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    concurrency: deploy-group
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cloudflare wrangler
+        run: npm install -g wrangler
+
+      - name: Configure wrangler with API token
+        run: |
+          wrangler config --api-token "${{ secrets.CLOUDFLARE_API_TOKEN }}"
+
+      - name: Create D1 database (if it doesn't exist)
+        run: |
+          # List existing D1 databases to check if the app DB exists
+          D1_LIST=$(wrangler d1 list --account-id ${{ env.CLOUDFLARE_ACCOUNT_ID }} --format json 2>/dev/null || true)
+          if echo "$D1_LIST" | jq -e '.[] | select(.database_name == env.D1_DATABASE_NAME)' > /dev/null; then
+            echo "D1 database '${D1_DATABASE_NAME}' already exists."
+          else
+            echo "Creating D1 database '${D1_DATABASE_NAME}'..."
+            wrangler d1 create ${{ env.D1_DATABASE_NAME }} --account-id ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          fi
+
+      - name: Get D1 connection string and ID
+        id: d1
+        run: |
+          DB_INFO=$(wrangler d1 list --account-id ${{ env.CLOUDFLARE_ACCOUNT_ID }} --format json | jq -r --arg name ${{ env.D1_DATABASE_NAME }} '.[] | select(.database_name == $name)')
+          DATABASE_URL=$(echo "$DB_INFO" | jq -r '.connection_string')
+          echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+          echo "D1_DATABASE_ID=$(echo "$DB_INFO" | jq -r '.id')" >> $GITHUB_ENV
+          echo "D1_DATABASE_NAME=$D1_DATABASE_NAME" >> $GITHUB_ENV
+
+      - name: Set D1 binding in wrangler.toml
+        run: |
+          sed -i "s/database_id = \"PLACEHOLDER_D1_DATABASE_ID\"/database_id = \"${{ env.D1_DATABASE_ID }}\"/" wrangler.toml
+
+      - name: Build Docker image for Cloudflare Containers
+        run: |
+          npx wrangler containers build . -t ${{ env.CLOUDFLARE_PROJECT_NAME }}:latest
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Push Docker image to Cloudflare Registry
+        run: |
+          npx wrangler containers push ${{ env.CLOUDFLARE_PROJECT_NAME }}:latest
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy container to Cloudflare Containers
+        run: |
+          # The Dockerfile at the repo root builds the frontend and copies it into
+          # the container, so the backend serves both /api/* and the React app.
+          # The Docker image contains everything needed (backend + frontend).
+          # We deploy the container using the Cloudflare Containers API.
+          npx wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy frontend to Cloudflare Pages
+        run: |
+          cd frontend && npm ci && npm run build
+          wrangler pages deploy dist --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "Build/push/deploy failed. Check logs above."
+
+  # ---------------------------------------------------------------------------
+  # 4. Post-deploy validation: poll the live health endpoint
+  # ---------------------------------------------------------------------------
+  verify-deploy:
+    name: Verify Cloudflare deployment
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    steps:
+      - name: Wait for release to go live
+        run: sleep 45
+
+      - name: Check live health endpoint
+        run: |
+          APP_URL="https://${{ env.CLOUDFLARE_PROJECT_NAME }}.${{ vars.CLOUDFLARE_CONTAINERS_REGION }}.containers.app"
+          echo "Checking $APP_URL/api/health"
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /tmp/health.json -w "%{http_code}" "$APP_URL/api/health" || echo "000")
+            echo "Attempt $i/20: HTTP $CODE"
+            if [ "$CODE" = "200" ] && grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/health.json; then
+              echo "Deploy verified: $APP_URL is healthy"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Live health check failed after 20 attempts"
+          exit 1
+
+      - name: Check frontend is served
+        run: |
+          APP_URL="https://${{ env.CLOUDFLARE_PROJECT_NAME }}.pages.dev"
+          CODE=$(curl -s -o /tmp/index.html -w "%{http_code}" "$APP_URL/" || echo "000")
+          echo "Frontend HTTP $CODE"
+          grep -q '<div id="root">' /tmp/index.html && echo "Frontend OK" || (echo "Frontend check failed"; exit 1)

@@ -230,3 +230,36 @@ fly deploy
 ## License
 
 Private repository.
+
+### Cloudflare (Free Tier)
+
+Cloudflare was chosen as an alternative deployment platform. The same codebase
+deploys to **Cloudflare Pages** (frontend), **Cloudflare Containers** (backend),
+and **Cloudflare D1** (database) — all on the free tier.
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) and [`_docs/cloudflare-deployment.md`](./_docs/cloudflare-deployment.md)
+for the full Cloudflare deployment guide.
+
+```bash
+# 1. Install wrangler and log in
+npm i -g wrangler
+wrangler login
+
+# 2. Create a D1 database
+wrangler d1 create restaurant-waitlist-db
+
+# 3. Set secrets
+wrangler secret put JWT_SECRET
+wrangler secret put DATABASE_URL
+
+# 4. Deploy the backend (Containers)
+wrangler deploy --env production
+
+# 5. Deploy the frontend (Pages)
+cd frontend && npm ci && npm run build
+wrangler pages deploy dist --project-name=restaurant-waitlist
+```
+
+## License
+
+Private repository.
