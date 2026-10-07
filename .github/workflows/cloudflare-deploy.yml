@@ -95,7 +95,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install test runner deps
-        run: pip install pytest requests psycopg2-binary psycopg
+        run: |
+          pip install pytest requests
+          pip install ./backend
 
       - name: Verify docker compose is available
         run: docker compose version
