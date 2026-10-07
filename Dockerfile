@@ -48,4 +48,3 @@ EXPOSE 8000
 # The backend serves the frontend static files from ./static
 # Use $PORT if provided by the platform (Fly.io sets PORT), else default to 8000
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
-
