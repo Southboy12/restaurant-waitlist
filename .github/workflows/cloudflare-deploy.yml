@@ -95,28 +95,22 @@ jobs:
           python-version: "3.12"
 
       - name: Install test runner deps
-        run: pip install pytest requests
+        run: pip install pytest requests psycopg2-binary psycopg
 
-      - name: Install Docker Compose v2 plugin
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose-plugin
-          docker compose version
-
-      - name: Install psycopg2 for integration tests
-        run: pip install psycopg2-binary
+      - name: Verify docker compose is available
+        run: docker compose version
 
       - name: Build and start the compose stack
         run: docker compose up -d --build
 
       - name: Wait for the stack to become healthy
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -fsS http://localhost:8000/api/health > /dev/null; then
               echo "Stack is healthy"
               exit 0
             fi
-            echo "Waiting for stack... ($i/30)"
+            echo "Waiting for stack... ($i/60)"
             sleep 5
           done
           echo "Stack never became healthy"
