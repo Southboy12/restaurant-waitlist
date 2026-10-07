@@ -21,6 +21,6 @@ class PartyModel(Base):
     expires_at = Column(BigInteger, nullable=True)
     resolved_at = Column(BigInteger, nullable=True)
     resolution = Column(
-        SAEnum(Resolution, name="resolution_enum", create_type=False),
+        SAEnum(Resolution, name="resolution_enum"),
         nullable=True
     )
