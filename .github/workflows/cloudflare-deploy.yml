@@ -146,65 +146,114 @@ jobs:
     needs: [compose-tests]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     concurrency: deploy-group
+    outputs:
+      app-url: ${{ steps.worker-url.outputs.app-url }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - name: Install Cloudflare wrangler
         run: npm install -g wrangler
 
-      - name: Configure wrangler with API token
-        run: |
-          wrangler config --api-token "${{ secrets.CLOUDFLARE_API_TOKEN }}"
+      - name: Verify wrangler authentication
+        run: npx wrangler whoami
 
-      - name: Create D1 database (if it doesn't exist)
+      - name: Ensure D1 database exists
+        env:
+          D1_DATABASE_NAME: ${{ env.D1_DATABASE_NAME }}
         run: |
-          # List existing D1 databases to check if the app DB exists
-          D1_LIST=$(wrangler d1 list --account-id ${{ env.CLOUDFLARE_ACCOUNT_ID }} --format json 2>/dev/null || true)
-          if echo "$D1_LIST" | jq -e '.[] | select(.database_name == env.D1_DATABASE_NAME)' > /dev/null; then
-            echo "D1 database '${D1_DATABASE_NAME}' already exists."
+          set -euo pipefail
+          DB_JSON=$(npx wrangler d1 list --json | jq --arg name "$D1_DATABASE_NAME" '[.[] | select(.name == $name)]')
+          if [ "$(echo "$DB_JSON" | jq 'length')" -eq 0 ]; then
+            echo "Creating D1 database '$D1_DATABASE_NAME'..."
+            npx wrangler d1 create "$D1_DATABASE_NAME"
           else
-            echo "Creating D1 database '${D1_DATABASE_NAME}'..."
-            wrangler d1 create ${{ env.D1_DATABASE_NAME }} --account-id ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+            echo "D1 database '$D1_DATABASE_NAME' already exists."
           fi
+          # Authoritative record: d1 info returns uuid/name for the named DB.
+          INFO=$(npx wrangler d1 info "$D1_DATABASE_NAME" --json)
+          echo "$INFO" | jq .
+          D1_ID=$(echo "$INFO" | jq -r '.uuid // empty')
+          if [ -z "$D1_ID" ]; then
+            echo "::error::Could not determine uuid for D1 database '$D1_DATABASE_NAME'"
+            exit 1
+          fi
+          echo "D1_DATABASE_ID=$D1_ID" >> "$GITHUB_ENV"
 
-      - name: Get D1 connection string and ID
-        id: d1
+      - name: Sync D1 database_id into wrangler.toml
         run: |
-          DB_INFO=$(wrangler d1 list --account-id ${{ env.CLOUDFLARE_ACCOUNT_ID }} --format json | jq -r --arg name ${{ env.D1_DATABASE_NAME }} '.[] | select(.database_name == $name)')
-          DATABASE_URL=$(echo "$DB_INFO" | jq -r '.connection_string')
-          echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
-          echo "D1_DATABASE_ID=$(echo "$DB_INFO" | jq -r '.id')" >> $GITHUB_ENV
-          echo "D1_DATABASE_NAME=$D1_DATABASE_NAME" >> $GITHUB_ENV
+          set -euo pipefail
+          echo "Binding wrangler.toml to D1 id: ${{ env.D1_DATABASE_ID }}"
+          python3 - "$D1_DATABASE_ID" <<'PY'
+          import re, sys
+          new_id = sys.argv[1]
+          path = "wrangler.toml"
+          text = open(path).read()
+          text, n = re.subn(r'(?m)^database_id\s*=.*$', f'database_id = "{new_id}"', text, count=1)
+          assert n == 1, "expected exactly one database_id line in wrangler.toml"
+          open(path, "w").write(text)
+          print(f"Updated database_id (1 line)")
+          PY
+          grep -n '^database_id' wrangler.toml
 
-      - name: Set D1 binding in wrangler.toml
+      - name: Build frontend for Worker assets
         run: |
-          sed -i "s/database_id = \"PLACEHOLDER_D1_DATABASE_ID\"/database_id = \"${{ env.D1_DATABASE_ID }}\"/" wrangler.toml
+          set -euo pipefail
+          cd frontend && npm ci && npm run build
+          test -f dist/index.html || (echo "::error::frontend/dist/index.html missing after build"; exit 1)
 
-      - name: Build Docker image for Cloudflare Containers
-        run: |
-          npx wrangler containers build . -t ${{ env.CLOUDFLARE_PROJECT_NAME }}:latest
+      - name: Set production secrets on the Worker
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-      - name: Push Docker image to Cloudflare Registry
+          JWT_SECRET_VALUE: ${{ secrets.JWT_SECRET }}
         run: |
-          npx wrangler containers push ${{ env.CLOUDFLARE_PROJECT_NAME }}:latest
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          set -euo pipefail
+          if [ -z "${JWT_SECRET_VALUE:-}" ]; then
+            echo "::error::JWT_SECRET repo secret is not set (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+          printf '%s' "$JWT_SECRET_VALUE" | npx wrangler secret put JWT_SECRET
 
-      - name: Deploy container to Cloudflare Containers
+      - name: Build and push container image
         run: |
-          # Deploy using the Containers API
-          npx wrangler deploy --env production
+          set -euo pipefail
+          npx wrangler containers build . -t "${{ env.CLOUDFLARE_PROJECT_NAME }}:latest" --push
+
+      - name: Deploy Worker + container to Cloudflare
+        run: |
+          set -euo pipefail
+          # wrangler.toml selects the image via [containers.images.base]; the
+          # explicit build step above keeps failures legible, deploy reuses it.
+          npx wrangler deploy
+
+      - name: Record the public Worker URL
+        id: worker-url
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(curl -fsS "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" | jq -r '.result.subdomain // empty')
+          if [ -z "$SUBDOMAIN" ]; then
+            echo "::error::Could not resolve the account's workers.dev subdomain."
+            exit 1
+          fi
+          APP_URL="https://${{ env.CLOUDFLARE_PROJECT_NAME }}.${SUBDOMAIN}.workers.dev"
+          echo "APP_URL=$APP_URL"
+          echo "APP_URL=$APP_URL" >> "$GITHUB_ENV"
+          echo "app-url=$APP_URL" >> "$GITHUB_OUTPUT"
 
       - name: Deploy frontend to Cloudflare Pages
         run: |
-          cd frontend && npm ci && npm run build
-          wrangler pages deploy dist --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          set -euo pipefail
+          # Idempotent: the project may already exist from a previous run.
+          npx wrangler pages project create "${{ env.CLOUDFLARE_PROJECT_NAME }}" \
+            --production-branch "${GITHUB_REF_NAME:-master}" || true
+          npx wrangler pages deploy frontend/dist --project-name="${{ env.CLOUDFLARE_PROJECT_NAME }}"
 
       - name: Dump logs on failure
         if: failure()
@@ -224,7 +273,8 @@ jobs:
 
       - name: Check live health endpoint
         run: |
-          APP_URL="https://${{ env.CLOUDFLARE_PROJECT_NAME }}.${{ vars.CLOUDFLARE_CONTAINERS_REGION }}.containers.app"
+          set -euo pipefail
+          APP_URL="${{ needs.deploy.outputs.app-url }}"
           echo "Checking $APP_URL/api/health"
           for i in $(seq 1 20); do
             CODE=$(curl -s -o /tmp/health.json -w "%{http_code}" "$APP_URL/api/health" || echo "000")
@@ -241,7 +291,8 @@ jobs:
 
       - name: Check frontend is served
         run: |
-          APP_URL="https://${{ env.CLOUDFLARE_PROJECT_NAME }}.pages.dev"
+          set -euo pipefail
+          APP_URL="${{ needs.deploy.outputs.app-url }}"
           CODE=$(curl -s -o /tmp/index.html -w "%{http_code}" "$APP_URL/" || echo "000")
           echo "Frontend HTTP $CODE"
           grep -q '<div id="root">' /tmp/index.html && echo "Frontend OK" || (echo "Frontend check failed"; exit 1)

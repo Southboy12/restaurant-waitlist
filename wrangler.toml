@@ -29,8 +29,9 @@ enabled = true
 [assets]
 directory = "./frontend/dist"
 binding = "ASSETS"
-# Serve the frontend for non-API paths
-run_worker_first = ["/", "/index.html"]
+# API traffic must reach the Worker first so it can proxy to the container.
+# Everything else is served directly from the static frontend assets.
+run_worker_first = ["/api", "/api/*"]
 
 # ============================================================================
 # Cloudflare Containers (backend FastAPI)
@@ -69,11 +70,12 @@ type = "durable-object"
 storage = "sqlite"
 
 # ============================================================================
-# D1 database (production database)
+# D1 database (production database binding)
 # ============================================================================
-# Set the following as secrets via: wrangler secret put <KEY>
-#   DATABASE_URL: D1 connection string (postgresql://...)
-#   JWT_SECRET:   production JWT signing secret
+# The container reads its runtime config from Worker vars/secrets:
+#   DATABASE_URL: defaults to an in-container SQLite file (see [vars] below).
+#                 Set a postgres URL via `wrangler secret put DATABASE_URL` for persistent prod data.
+#   JWT_SECRET:   set via `wrangler secret put JWT_SECRET` (CI does this from the JWT_SECRET repo secret).
 
 [[d1_databases]]
 binding = "restaurant_waitlist_db"
