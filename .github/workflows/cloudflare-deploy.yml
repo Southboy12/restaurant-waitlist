@@ -220,17 +220,15 @@ jobs:
           fi
           printf '%s' "$JWT_SECRET_VALUE" | npx wrangler secret put JWT_SECRET
 
-      - name: Build and push container image
-        run: |
-          set -euo pipefail
-          npx wrangler containers build . -t "${{ env.CLOUDFLARE_PROJECT_NAME }}:latest" --push
-
       - name: Deploy Worker + container to Cloudflare
         run: |
           set -euo pipefail
-          # wrangler.toml selects the image via [containers.images.base]; the
-          # explicit build step above keeps failures legible, deploy reuses it.
-          npx wrangler deploy
+          # Single deploy path per official docs: for a Dockerfile image,
+          # `wrangler deploy` builds and pushes the image when needed, then
+          # rolls out the Worker + container. A separate
+          # `containers build --push` step is redundant and only adds a second
+          # registry-auth failure surface, so it is intentionally omitted.
+          wrangler deploy
 
       - name: Record the public Worker URL
         id: worker-url

@@ -79,7 +79,9 @@ storage = "sqlite"
 
 [[d1_databases]]
 binding = "restaurant_waitlist_db"
-database_name = "restaurant-waitlist-db"
+# Must match the D1_DATABASE_NAME the CI workflow provisions (waitlist-db).
+# CI overwrites database_id below with the live uuid on every deploy.
+database_name = "waitlist-db"
 database_id = "6359d8ef-b1e0-4cdd-968c-b5ce717c265f"
 
 # ============================================================================
