@@ -165,6 +165,21 @@ jobs:
       - name: Verify wrangler authentication
         run: npx wrangler whoami
 
+      - name: Preflight Containers registry access
+        # Fails fast (seconds) instead of after the multi-minute Docker build.
+        # `images list` exercises the same containers:write / registry auth as
+        # `deploy`'s push. A 401 here means the API token lacks "Manage Workers
+        # Containers" (OAuth scope containers:write) or the account is not on
+        # the Workers Paid plan that Containers requires.
+        run: |
+          set -euo pipefail
+          echo "Checking Containers registry access..."
+          npx wrangler containers images list || {
+            echo "::error::Containers registry check failed. In the Cloudflare dashboard, edit the CLOUDFLARE_API_TOKEN: add the Workers Containers -> Edit permission (\"Manage Workers Containers\"), keep Account:Workers Scripts Edit + D1 Edit + Pages, and confirm the account is on the Workers Paid plan."
+            exit 1
+          }
+          echo "Containers registry access OK."
+
       - name: Ensure D1 database exists
         env:
           D1_DATABASE_NAME: ${{ env.D1_DATABASE_NAME }}
