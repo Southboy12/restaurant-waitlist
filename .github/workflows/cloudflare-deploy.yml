@@ -157,7 +157,9 @@ jobs:
           node-version: "20"
 
       - name: Install Cloudflare wrangler
-        run: npm install -g wrangler
+        # Pin to the version validated locally: >=4.136 for durable_object
+        # scheduling + images.base.dockerfile config shape.
+        run: npm install -g wrangler@4.148.0
 
       - name: Verify wrangler authentication
         run: npx wrangler whoami
