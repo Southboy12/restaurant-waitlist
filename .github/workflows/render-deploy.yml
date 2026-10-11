@@ -176,12 +176,20 @@ jobs:
         run: |
           set -euo pipefail
           # Deploy hook: a single POST starts a new deploy of the service.
-          # We pin ?ref to the exact commit that just passed tests so a racing
-          # push can't cause Render to deploy an untested commit. Render builds
-          # the root Dockerfile and rolls it out; no Docker build happens here,
-          # so a failure is almost always a missing/wrong hook URL.
+          # We pin ref=<sha> to the exact commit that just passed tests so a
+          # racing push can't cause Render to deploy an untested commit. Render
+          # builds the root Dockerfile and rolls it out; no Docker build happens
+          # here, so a failure is almost always a missing/wrong hook URL.
+          #
+          # Render hook URLs already contain a query string (?key=...), so we
+          # must append ref= with the correct separator (&, not ?). Using a
+          # second ? yields "...?key=...?ref=..." which Render rejects with 404.
           echo "Triggering Render deploy for commit $COMMIT_SHA..."
-          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL?ref=$COMMIT_SHA"
+          sep='?'
+          case "$RENDER_DEPLOY_HOOK_URL" in
+            *\?*) sep='&' ;;
+          esac
+          curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}${sep}ref=${COMMIT_SHA}"
           echo "Deploy triggered. Render will build and roll out the service."
 
   # ---------------------------------------------------------------------------
